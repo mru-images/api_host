@@ -13,18 +13,17 @@ import tempfile
 
 app = FastAPI()
 
+# ✅ Hardcoded Drive folder ID (shared with service account)
+SHARED_FOLDER_ID = '15qjD_koVrx_aecL9feTOrXAB7GDyjp7H'  # <-- Replace with your real folder ID
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
-# 🔐 Your Google Drive folder ID (keep hardcoded)
-SHARED_FOLDER_ID = 'YOUR_SHARED_FOLDER_ID'  # 🔁 Replace with your folder ID
 
-
-# 🔑 Load service account from env var
+# 🔐 Load Google Drive service using service account (from env)
 def get_drive_service():
     encoded_creds = os.getenv("GOOGLE_CREDENTIALS")
     if not encoded_creds:
         raise Exception("Missing GOOGLE_CREDENTIALS environment variable")
-    
+
     creds_json = base64.b64decode(encoded_creds).decode('utf-8')
     creds_dict = json.loads(creds_json)
     creds = service_account.Credentials.from_service_account_info(
@@ -33,21 +32,24 @@ def get_drive_service():
     return build('drive', 'v3', credentials=creds)
 
 
-# 🎧 Download audio using cookies from env var
+# 🎧 Download YouTube audio using yt-dlp and cookies
 def download_audio_to_memory(video_url: str) -> (BytesIO, str):
     buffer = BytesIO()
     temp_id = str(uuid.uuid4())
     filename = f"{temp_id}.webm"
 
-    # 🔓 Decode YouTube cookies
+    # 🔓 Load cookies from env
     encoded_cookies = os.getenv("YOUTUBE_COOKIES")
     if not encoded_cookies:
         raise Exception("Missing YOUTUBE_COOKIES environment variable")
-    
+
     cookies_text = base64.b64decode(encoded_cookies).decode("utf-8")
     with tempfile.NamedTemporaryFile(delete=False, mode='w+', suffix=".txt") as cookie_file:
         cookie_file.write(cookies_text)
         cookie_file_path = cookie_file.name
+
+    print(f"[INFO] YouTube cookies loaded and written to temp file: {cookie_file_path}")
+    print("[INFO] Using YouTube cookies for yt-dlp download.")
 
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -71,7 +73,7 @@ def download_audio_to_memory(video_url: str) -> (BytesIO, str):
     return buffer, filename
 
 
-# ☁️ Upload to Google Drive
+# ☁️ Upload audio file to Google Drive
 def upload_memory_to_drive(memory_file: BytesIO, filename: str) -> str:
     service = get_drive_service()
 
@@ -97,11 +99,13 @@ def upload_memory_to_drive(memory_file: BytesIO, filename: str) -> str:
     return f"https://drive.google.com/file/d/{file_id}/view"
 
 
+# 🌐 Base route
 @app.get("/")
 def home():
     return {"message": "YouTube Audio Upload API with Google Drive (ENV Mode)"}
 
 
+# 🚀 Upload route
 @app.get("/upload")
 def upload(link: str = Query(..., description="YouTube video link")):
     try:
