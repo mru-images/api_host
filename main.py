@@ -1,39 +1,53 @@
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import JSONResponse
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-from google.oauth2 import service_account
 import yt_dlp
 import os
-import json
 import uuid
-import base64
 from io import BytesIO
+import json
+import base64
+import tempfile
 
 app = FastAPI()
 
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
-SHARED_FOLDER_ID = '15qjD_koVrx_aecL9feTOrXAB7GDyjp7H'  # Replace with your real Google Drive folder ID
 
-# Load service account credentials from environment variable
+# 🔐 Your Google Drive folder ID (keep hardcoded)
+SHARED_FOLDER_ID = '15qjD_koVrx_aecL9feTOrXAB7GDyjp7H'  # 🔁 Replace with your folder ID
+
+
+# 🔑 Load service account from env var
 def get_drive_service():
-    encoded = os.getenv("GOOGLE_CREDENTIALS")
-    if not encoded:
-        raise Exception("Missing GOOGLE_CREDENTIALS environment variable.")
-
-    decoded = base64.b64decode(encoded).decode("utf-8")
-    service_account_info = json.loads(decoded)
-
+    encoded_creds = os.getenv("GOOGLE_CREDENTIALS")
+    if not encoded_creds:
+        raise Exception("Missing GOOGLE_CREDENTIALS environment variable")
+    
+    creds_json = base64.b64decode(encoded_creds).decode('utf-8')
+    creds_dict = json.loads(creds_json)
     creds = service_account.Credentials.from_service_account_info(
-        service_account_info, scopes=SCOPES
+        creds_dict, scopes=SCOPES
     )
     return build('drive', 'v3', credentials=creds)
 
-# Download audio from YouTube to memory
+
+# 🎧 Download audio using cookies from env var
 def download_audio_to_memory(video_url: str) -> (BytesIO, str):
     buffer = BytesIO()
     temp_id = str(uuid.uuid4())
     filename = f"{temp_id}.webm"
+
+    # 🔓 Decode YouTube cookies
+    encoded_cookies = os.getenv("YOUTUBE_COOKIES")
+    if not encoded_cookies:
+        raise Exception("Missing YOUTUBE_COOKIES environment variable")
+    
+    cookies_text = base64.b64decode(encoded_cookies).decode("utf-8")
+    with tempfile.NamedTemporaryFile(delete=False, mode='w+', suffix=".txt") as cookie_file:
+        cookie_file.write(cookies_text)
+        cookie_file_path = cookie_file.name
 
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -41,6 +55,7 @@ def download_audio_to_memory(video_url: str) -> (BytesIO, str):
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
+        'cookiefile': cookie_file_path,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -52,9 +67,11 @@ def download_audio_to_memory(video_url: str) -> (BytesIO, str):
         buffer.seek(0)
 
     os.remove(full_path)
+    os.remove(cookie_file_path)
     return buffer, filename
 
-# Upload file to Google Drive
+
+# ☁️ Upload to Google Drive
 def upload_memory_to_drive(memory_file: BytesIO, filename: str) -> str:
     service = get_drive_service()
 
@@ -79,12 +96,12 @@ def upload_memory_to_drive(memory_file: BytesIO, filename: str) -> str:
 
     return f"https://drive.google.com/file/d/{file_id}/view"
 
-# API Home
+
 @app.get("/")
 def home():
-    return {"message": "YouTube Audio Upload API with Google Drive (Service Account)"}
+    return {"message": "YouTube Audio Upload API with Google Drive (ENV Mode)"}
 
-# Upload Endpoint
+
 @app.get("/upload")
 def upload(link: str = Query(..., description="YouTube video link")):
     try:
