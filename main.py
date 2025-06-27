@@ -9,15 +9,16 @@ import uuid
 from io import BytesIO
 import json
 import base64
-import tempfile
 
 app = FastAPI()
 
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 # 🔐 Your Google Drive folder ID (keep hardcoded)
-SHARED_FOLDER_ID = '15qjD_koVrx_aecL9feTOrXAB7GDyjp7H'  # 🔁 Replace with your folder ID
+SHARED_FOLDER_ID = '15qjD_koVrx_aecL9feTOrXAB7GDyjp7H'  # ✅ Replace with your folder ID
 
+# 📁 Local cookies file path
+COOKIE_FILE_PATH = 'youtube_cookies.txt'
 
 # 🔑 Load service account from env var
 def get_drive_service():
@@ -33,21 +34,14 @@ def get_drive_service():
     return build('drive', 'v3', credentials=creds)
 
 
-# 🎧 Download audio using cookies from env var
+# 🎧 Download audio using cookies from file
 def download_audio_to_memory(video_url: str) -> (BytesIO, str):
     buffer = BytesIO()
     temp_id = str(uuid.uuid4())
     filename = f"{temp_id}.webm"
 
-    # 🔓 Decode YouTube cookies
-    encoded_cookies = os.getenv("YOUTUBE_COOKIES")
-    if not encoded_cookies:
-        raise Exception("Missing YOUTUBE_COOKIES environment variable")
-    
-    cookies_text = base64.b64decode(encoded_cookies).decode("utf-8")
-    with tempfile.NamedTemporaryFile(delete=False, mode='w+', suffix=".txt") as cookie_file:
-        cookie_file.write(cookies_text)
-        cookie_file_path = cookie_file.name
+    if not os.path.exists(COOKIE_FILE_PATH):
+        raise HTTPException(status_code=500, detail="youtube_cookies.txt not found")
 
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -55,8 +49,10 @@ def download_audio_to_memory(video_url: str) -> (BytesIO, str):
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'cookiefile': cookie_file_path,
+        'cookiefile': COOKIE_FILE_PATH,
     }
+
+    print("✅ Using cookies from file:", COOKIE_FILE_PATH)
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(video_url, download=True)
@@ -67,7 +63,6 @@ def download_audio_to_memory(video_url: str) -> (BytesIO, str):
         buffer.seek(0)
 
     os.remove(full_path)
-    os.remove(cookie_file_path)
     return buffer, filename
 
 
@@ -99,7 +94,7 @@ def upload_memory_to_drive(memory_file: BytesIO, filename: str) -> str:
 
 @app.get("/")
 def home():
-    return {"message": "YouTube Audio Upload API with Google Drive (ENV Mode)"}
+    return {"message": "YouTube Audio Upload API with Google Drive (cookies from file)"}
 
 
 @app.get("/upload")
